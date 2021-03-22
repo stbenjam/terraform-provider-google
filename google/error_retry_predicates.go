@@ -190,7 +190,44 @@ func isSqlOperationInProgressError(err error) (bool, string) {
 	return false, ""
 }
 
-// Retry if Monitoring operation returns a 429 with a specific message for
+// Retry if service usage decides you're activating the same service multiple
+// times. This can happen if a service and a dependent service aren't batched
+// together- eg container.googleapis.com in one request followed by compute.g.c
+// in the next (container relies on compute and implicitly activates it)
+func serviceUsageServiceBeingActivated(err error) (bool, string) {
+	if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == 400 {
+		if strings.Contains(gerr.Body, "Another activation or deactivation is in progress") {
+			return true, "Waiting for same service activation/deactivation to finish"
+		}
+
+		return false, ""
+	}
+	return false, ""
+}
+
+// Retry if Bigquery operation returns a 403 with a specific message for
+// concurrent operations (which are implemented in terms of 'edit quota').
+func isBigqueryIAMQuotaError(err error) (bool, string) {
+	if gerr, ok := err.(*googleapi.Error); ok {
+		if gerr.Code == 403 && strings.Contains(strings.ToLower(gerr.Body), "exceeded rate limits") {
+			return true, "Waiting for Bigquery edit quota to refresh"
+		}
+	}
+	return false, ""
+}
+
+// Retry if operation returns a 403 with the message for
+// exceeding the quota limit for 'OperationReadGroup'
+func isOperationReadQuotaError(err error) (bool, string) {
+	if gerr, ok := err.(*googleapi.Error); ok {
+		if gerr.Code == 403 && strings.Contains(gerr.Body, "Quota exceeded for quota group 'OperationReadGroup'") {
+			return true, "Waiting for quota to refresh"
+		}
+	}
+	return false, ""
+}
+
+// Retry if Monitoring operation returns a 409 with a specific message for
 // concurrent operations.
 func isMonitoringConcurrentEditError(err error) (bool, string) {
 	if gerr, ok := err.(*googleapi.Error); ok {
